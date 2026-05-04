@@ -7,6 +7,8 @@ export async function sendOrderEmails(order, invoice) {
   const invoiceSubject = `${order.invoiceNumber} - Votre facture`;
   const sellerSubject = `${order.invoiceNumber} - Nouvelle commande reglee`;
   const legalLinks = buildLegalLinks();
+  const trackingLink = buildTrackingLink(order);
+  const shippingLabelLink = buildShippingLabelLink(order);
   const invoiceAttachment = {
     filename: invoice.fileName,
     content: Buffer.from(invoice.html, "utf8").toString("base64")
@@ -20,7 +22,8 @@ export async function sendOrderEmails(order, invoice) {
       <p>Merci pour votre commande chez ${escapeHtml(config.seller.brandName)}.</p>
       <p>Commande : <strong>${escapeHtml(order.orderNumber)}</strong><br>Montant : <strong>${escapeHtml(formatPrice(order.totalAmount))}</strong></p>
       ${buildItemsList(order)}
-      ${buildShippingSummary(order)}
+      ${buildShippingSummary(order, { audience: "client" })}
+      ${trackingLink ? `<p><strong>Suivi de livraison :</strong><br><a href="${escapeHtml(trackingLink)}">${escapeHtml(trackingLink)}</a></p>` : ""}
       <p>Votre facture est envoyee dans un second email.</p>
       ${legalLinks}
     `),
@@ -50,7 +53,9 @@ export async function sendOrderEmails(order, invoice) {
       <p>Commande : <strong>${escapeHtml(order.orderNumber)}</strong><br>Facture : <strong>${escapeHtml(order.invoiceNumber)}</strong></p>
       <p>Client : ${escapeHtml(clientName)}<br>Email : ${escapeHtml(order.customer.email)}<br>Telephone : ${escapeHtml(order.customer.phone)}</p>
       ${buildItemsList(order)}
-      ${buildShippingSummary(order)}
+      ${buildShippingSummary(order, { audience: "seller" })}
+      ${shippingLabelLink ? `<p><strong>Etiquette d'envoi :</strong><br><a href="${escapeHtml(shippingLabelLink)}">${escapeHtml(shippingLabelLink)}</a></p>` : ""}
+      ${trackingLink ? `<p><strong>Suivi client :</strong><br><a href="${escapeHtml(trackingLink)}">${escapeHtml(trackingLink)}</a></p>` : ""}
       <p>Total : <strong>${escapeHtml(formatPrice(order.totalAmount))}</strong></p>
       <p>Identifiant capture PayPal : ${escapeHtml(order.paypal.captureId || "")}</p>
       ${legalLinks}
@@ -112,20 +117,63 @@ function buildItemsList(order) {
   return `<ul>${rows}</ul>`;
 }
 
-function buildShippingSummary(order) {
+function buildShippingSummary(order, { audience = "client" } = {}) {
   if (!order.shipping?.selectedOption) return "";
 
-  const trackingLink = order.shipping?.shipment?.trackingUrl
-    ? `<br><a href="${escapeHtml(order.shipping.shipment.trackingUrl)}">Suivre la livraison</a>`
+  const selectedServicePoint = order.shipping?.selectedServicePoint;
+  const servicePointBlock = selectedServicePoint
+    ? `<br>Point relais : <strong>${escapeHtml(selectedServicePoint.name || "")}</strong>${formatServicePointLine(selectedServicePoint)}`
+    : "";
+  const helperLine = audience === "seller" && order.shipping?.shipment?.parcelId
+    ? `<br>Colis Sendcloud : <strong>#${escapeHtml(order.shipping.shipment.parcelId)}</strong>`
     : "";
 
   return `
     <p>
       Livraison : <strong>${escapeHtml(order.shipping.selectedOption.label)}</strong><br>
       Frais : <strong>${escapeHtml(formatPrice(order.shipping.shippingAmount || 0))}</strong>
-      ${trackingLink}
+      ${servicePointBlock}
+      ${helperLine}
     </p>
   `;
+}
+
+function buildTrackingLink(order) {
+  return cleanLink(
+    order.shipping?.shipment?.trackingUrl
+    || order.shipping?.shipment?.sendcloudTrackingUrl
+  );
+}
+
+function buildShippingLabelLink(order) {
+  const shipment = order.shipping?.shipment;
+  return cleanLink(
+    shipment?.label?.normal_printer
+    || shipment?.label?.printer
+    || shipment?.label?.label_printer
+    || shipment?.rawParcel?.label?.normal_printer
+    || shipment?.rawParcel?.label?.printer
+    || shipment?.rawParcel?.label?.label_printer
+    || shipment?.rawParcel?.label
+  );
+}
+
+function formatServicePointLine(servicePoint) {
+  const line = [
+    [clean(servicePoint.street), clean(servicePoint.houseNumber)].filter(Boolean).join(" ").trim(),
+    [clean(servicePoint.postalCode), clean(servicePoint.city)].filter(Boolean).join(" ").trim()
+  ].filter(Boolean).join(", ");
+
+  return line ? `<br>${escapeHtml(line)}` : "";
+}
+
+function cleanLink(value) {
+  const link = String(value || "").trim();
+  return /^https?:\/\//i.test(link) ? link : "";
+}
+
+function clean(value) {
+  return String(value || "").trim();
 }
 
 function buildLegalLinks() {
