@@ -61,6 +61,20 @@ export const config = {
     from: process.env.EMAIL_FROM || "",
     resendApiKey: process.env.RESEND_API_KEY || "",
     clientNotificationEmail: process.env.CLIENT_NOTIFICATION_EMAIL || ""
+  },
+  shipping: {
+    defaultCountry: cleanEnv(process.env.SHIPPING_DEFAULT_COUNTRY || "FR").toUpperCase(),
+    freeThreshold: parsePositiveNumber(process.env.SHIPPING_FREE_THRESHOLD, 50),
+    defaultWeightKg: parsePositiveNumber(process.env.SHIPPING_DEFAULT_WEIGHT_KG, 0.35),
+    defaultLengthCm: parsePositiveNumber(process.env.SHIPPING_DEFAULT_LENGTH_CM, 35),
+    defaultWidthCm: parsePositiveNumber(process.env.SHIPPING_DEFAULT_WIDTH_CM, 25),
+    defaultHeightCm: parsePositiveNumber(process.env.SHIPPING_DEFAULT_HEIGHT_CM, 6)
+  },
+  sendcloud: {
+    publicKey: process.env.SENDCLOUD_PUBLIC_KEY || "",
+    secretKey: process.env.SENDCLOUD_SECRET_KEY || "",
+    senderAddressId: process.env.SENDCLOUD_SENDER_ADDRESS_ID || "",
+    shippingOptions: parseJsonEnv(process.env.SENDCLOUD_SHIPPING_OPTIONS_JSON, defaultSendcloudShippingOptions())
   }
 };
 
@@ -88,6 +102,62 @@ function resolveOptionalPath(value) {
   return path.isAbsolute(normalized)
     ? normalized
     : path.resolve(backendRoot, normalized);
+}
+
+function parseJsonEnv(value, fallback) {
+  const normalized = cleanEnv(value);
+  if (!normalized) return fallback;
+
+  try {
+    const parsed = JSON.parse(normalized);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parsePositiveNumber(value, fallback) {
+  const amount = Number.parseFloat(cleanEnv(value).replace(",", "."));
+  return Number.isFinite(amount) && amount > 0 ? amount : fallback;
+}
+
+function cleanEnv(value) {
+  return String(value || "").trim();
+}
+
+function defaultSendcloudShippingOptions() {
+  return [
+    {
+      id: "colissimo-home",
+      label: "Colissimo domicile",
+      carrier: "Colissimo",
+      description: "Livraison a domicile avec suivi.",
+      price: 5.9,
+      freeAboveOrderAmount: 50,
+      estimatedDaysMin: 2,
+      estimatedDaysMax: 3,
+      country: "FR",
+      matcher: {
+        carrier: "colissimo",
+        nameIncludes: "domicile"
+      }
+    },
+    {
+      id: "chronopost-home",
+      label: "Chronopost express",
+      carrier: "Chronopost",
+      description: "Livraison rapide a domicile avec suivi.",
+      price: 8.9,
+      freeAboveOrderAmount: null,
+      estimatedDaysMin: 1,
+      estimatedDaysMax: 2,
+      country: "FR",
+      matcher: {
+        carrier: "chronopost",
+        nameIncludes: ""
+      }
+    }
+  ];
 }
 
 function loadDotEnv(filePath) {

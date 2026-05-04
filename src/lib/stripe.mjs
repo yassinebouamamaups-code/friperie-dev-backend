@@ -32,6 +32,18 @@ export async function createStripeCheckoutSession(order) {
     }
   });
 
+  if (Number(order.shipping?.shippingAmount || 0) > 0) {
+    const shippingIndex = order.items.length;
+    params.set(`line_items[${shippingIndex}][quantity]`, "1");
+    params.set(`line_items[${shippingIndex}][price_data][currency]`, config.stripe.currency);
+    params.set(`line_items[${shippingIndex}][price_data][unit_amount]`, String(toMinorUnits(order.shipping.shippingAmount)));
+    params.set(`line_items[${shippingIndex}][price_data][product_data][name]`, order.shipping?.selectedOption?.label || "Livraison");
+    const shippingDescription = [order.shipping?.selectedOption?.carrier, order.shipping?.selectedOption?.estimatedLabel].filter(Boolean).join(" - ");
+    if (shippingDescription) {
+      params.set(`line_items[${shippingIndex}][price_data][product_data][description]`, shippingDescription);
+    }
+  }
+
   return stripeRequest("/checkout/sessions", {
     method: "POST",
     body: params

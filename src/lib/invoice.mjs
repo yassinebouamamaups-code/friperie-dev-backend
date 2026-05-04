@@ -10,6 +10,7 @@ export function formatPrice(value) {
 }
 
 export function buildInvoiceHtml(order) {
+  const shippingAmount = Number(order.shipping?.shippingAmount || 0);
   const itemRows = order.items.map((item) => `
     <tr>
       <td>${escapeHtml(item.name)}${item.size ? `<br><small>Taille : ${escapeHtml(item.size)}</small>` : ""}</td>
@@ -18,6 +19,16 @@ export function buildInvoiceHtml(order) {
       <td>${escapeHtml(formatPrice(item.unitAmount * item.quantity))}</td>
     </tr>
   `).join("");
+  const shippingRow = order.shipping?.selectedOption
+    ? `
+    <tr>
+      <td>Livraison${order.shipping.selectedOption.carrier ? `<br><small>${escapeHtml(order.shipping.selectedOption.carrier)}</small>` : ""}</td>
+      <td>1</td>
+      <td>${escapeHtml(formatPrice(shippingAmount))}</td>
+      <td>${escapeHtml(formatPrice(shippingAmount))}</td>
+    </tr>
+  `
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -71,7 +82,7 @@ export function buildInvoiceHtml(order) {
       <div class="box">
         <h2>Vendeur</h2>
         <p>Email : ${escapeHtml(config.seller.email)}</p>
-        <p>Téléphone : ${escapeHtml(config.seller.phone)}</p>
+        <p>Telephone : ${escapeHtml(config.seller.phone)}</p>
         ${config.seller.siret ? `<p>SIRET : ${escapeHtml(config.seller.siret)}</p>` : ""}
         ${config.seller.vatNumber ? `<p>TVA : ${escapeHtml(config.seller.vatNumber)}</p>` : ""}
       </div>
@@ -81,22 +92,24 @@ export function buildInvoiceHtml(order) {
       <thead>
         <tr>
           <th>Article</th>
-          <th>Qté</th>
+          <th>Qte</th>
           <th>Prix unitaire</th>
           <th>Total</th>
         </tr>
       </thead>
-      <tbody>${itemRows}</tbody>
+      <tbody>${itemRows}${shippingRow}</tbody>
     </table>
 
     <div class="totals">
-      <div><span>Sous-total</span><span>${escapeHtml(formatPrice(order.totalAmount))}</span></div>
+      <div><span>Sous-total articles</span><span>${escapeHtml(formatPrice(order.itemsSubtotalAmount || order.totalAmount))}</span></div>
+      <div><span>Livraison</span><span>${escapeHtml(formatPrice(shippingAmount))}</span></div>
       <div><strong>Total</strong><strong>${escapeHtml(formatPrice(order.totalAmount))}</strong></div>
     </div>
 
     <footer>
       <p>Transaction PayPal : ${escapeHtml(order.paypal.captureId || order.paypal.orderId || "")}</p>
-      <p>Facture générée automatiquement après confirmation du paiement.</p>
+      ${order.shipping?.shipment?.trackingUrl ? `<p>Suivi livraison : <a href="${escapeHtml(order.shipping.shipment.trackingUrl)}">${escapeHtml(order.shipping.shipment.trackingUrl)}</a></p>` : ""}
+      <p>Facture generee automatiquement apres confirmation du paiement.</p>
     </footer>
   </main>
 </body>

@@ -6,6 +6,7 @@ import { httpError } from "./http.mjs";
 import { isProductUnavailable, markItemsUnavailable } from "./inventory.mjs";
 import { sendOrderEmails } from "./mailer.mjs";
 import { writeInvoice } from "./invoice.mjs";
+import { applyShipmentTrackingUpdate, createShipmentForOrder, resolveShippingSelection } from "./sendcloud.mjs";
 
 export async function buildDraftOrder(payload) {
   const customer = normalizeCustomer(payload.customer);
@@ -20,9 +21,15 @@ export async function buildDraftOrder(payload) {
   if (soldItem) {
     throw httpError(409, `L'article ${soldItem.name} n'est plus disponible.`);
   }
+  const itemsSubtotalAmount = items.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
+  const shipping = buildShippingSelection(payload.shipping, {
+    orderAmount: itemsSubtotalAmount,
+    country: customer.country || "FR",
+    items
+  });
   const now = new Date();
   const stamp = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-  const totalAmount = items.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
+  const totalAmount = itemsSubtotalAmount + (shipping.shippingAmount || 0);
   const order = {
     id: crypto.randomUUID(),
     orderNumber: `CMD-${stamp}-${Math.floor(Math.random() * 900 + 100)}`,
@@ -33,6 +40,8 @@ export async function buildDraftOrder(payload) {
     paymentProvider: clean(payload.paymentProvider || "paypal") || "paypal",
     customer,
     items,
+    shipping,
+    itemsSubtotalAmount,
     totalAmount,
     seller: config.seller,
     paypal: {
@@ -115,6 +124,7 @@ export async function markOrderPaidFromCapture(paypalOrderId, capturePayload) {
       rawCapture: capturePayload
     }
   };
+  next.shipping = await attachShipment(next);
 
   const invoice = writeInvoice(next);
   next.invoice = {
@@ -154,6 +164,7 @@ export async function markOrderPaidFromStripeSession(sessionId, sessionPayload) 
       rawSession: sessionPayload
     }
   };
+  next.shipping = await attachShipment(next);
 
   const invoice = writeInvoice(next);
   next.invoice = {
@@ -199,6 +210,21 @@ export function getOrderByStripeSessionId(sessionId) {
   return order;
 }
 
+export function getOrderBySendcloudParcelId(parcelId) {
+  const order = orderStore.findBySendcloudParcelId(parcelId);
+  if (!order) {
+    throw httpError(404, "Commande Sendcloud introuvable.");
+  }
+  return order;
+}
+
+export function updateOrderShippingFromWebhook(parcelId, webhookPayload) {
+  const existing = getOrderBySendcloudParcelId(parcelId);
+  const next = applyShipmentTrackingUpdate(existing, webhookPayload);
+  orderStore.save(next);
+  return next;
+}
+
 function normalizeCart(value) {
   const items = Array.isArray(value) ? value : [];
   return items.map((item) => ({
@@ -230,7 +256,9 @@ function normalizeCustomer(customer) {
     phone: clean(customer?.phone),
     addressLine1: clean(customer?.addressLine1),
     postalCode: clean(customer?.postalCode),
-    city: clean(customer?.city)
+    city: clean(customer?.city),
+    country: clean(customer?.country || "FR"),
+    customerNote: clean(customer?.customerNote)
   };
 
   const requiredFields = [
@@ -254,4 +282,49 @@ function normalizeCustomer(customer) {
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+function buildShippingSelection(shippingPayload, context) {
+  const optionId = clean(shippingPayload?.optionId);
+  if (!optionId) {
+    throw httpError(400, "Choisissez un mode de livraison.");
+  }
+
+  const selectedOption = resolveShippingSelection(optionId, context);
+  const itemCount = context.items.reduce((sum, item) => sum + item.quantity, 0);
+  const packageWeightKg = Number((config.shipping.defaultWeightKg * Math.max(itemCount, 1)).toFixed(3));
+
+  return {
+    country: clean(context.country || config.shipping.defaultCountry).toUpperCase(),
+    selectedOption,
+    shippingAmount: selectedOption.shippingAmount,
+    package: {
+      weightKg: packageWeightKg,
+      lengthCm: config.shipping.defaultLengthCm,
+      widthCm: config.shipping.defaultWidthCm,
+      heightCm: config.shipping.defaultHeightCm,
+      itemsCount: itemCount
+    },
+    shipment: null
+  };
+}
+
+async function attachShipment(order) {
+  try {
+    return {
+      ...order.shipping,
+      shipment: await createShipmentForOrder(order)
+    };
+  } catch (error) {
+    return {
+      ...order.shipping,
+      shipment: {
+        enabled: true,
+        provider: "sendcloud",
+        status: "error",
+        message: error?.message || "La creation du colis a echoue.",
+        details: error?.details || null
+      }
+    };
+  }
 }

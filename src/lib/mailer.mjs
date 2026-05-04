@@ -20,6 +20,7 @@ export async function sendOrderEmails(order, invoice) {
       <p>Merci pour votre commande chez ${escapeHtml(config.seller.brandName)}.</p>
       <p>Commande : <strong>${escapeHtml(order.orderNumber)}</strong><br>Montant : <strong>${escapeHtml(formatPrice(order.totalAmount))}</strong></p>
       ${buildItemsList(order)}
+      ${buildShippingSummary(order)}
       <p>Votre facture est envoyee dans un second email.</p>
       ${legalLinks}
     `),
@@ -49,6 +50,7 @@ export async function sendOrderEmails(order, invoice) {
       <p>Commande : <strong>${escapeHtml(order.orderNumber)}</strong><br>Facture : <strong>${escapeHtml(order.invoiceNumber)}</strong></p>
       <p>Client : ${escapeHtml(clientName)}<br>Email : ${escapeHtml(order.customer.email)}<br>Telephone : ${escapeHtml(order.customer.phone)}</p>
       ${buildItemsList(order)}
+      ${buildShippingSummary(order)}
       <p>Total : <strong>${escapeHtml(formatPrice(order.totalAmount))}</strong></p>
       <p>Identifiant capture PayPal : ${escapeHtml(order.paypal.captureId || "")}</p>
       ${legalLinks}
@@ -108,6 +110,22 @@ function wrapEmail(content) {
 function buildItemsList(order) {
   const rows = order.items.map((item) => `<li>${escapeHtml(item.name)}${item.size ? ` - taille ${escapeHtml(item.size)}` : ""} x${item.quantity} - ${escapeHtml(formatPrice(item.unitAmount * item.quantity))}</li>`).join("");
   return `<ul>${rows}</ul>`;
+}
+
+function buildShippingSummary(order) {
+  if (!order.shipping?.selectedOption) return "";
+
+  const trackingLink = order.shipping?.shipment?.trackingUrl
+    ? `<br><a href="${escapeHtml(order.shipping.shipment.trackingUrl)}">Suivre la livraison</a>`
+    : "";
+
+  return `
+    <p>
+      Livraison : <strong>${escapeHtml(order.shipping.selectedOption.label)}</strong><br>
+      Frais : <strong>${escapeHtml(formatPrice(order.shipping.shippingAmount || 0))}</strong>
+      ${trackingLink}
+    </p>
+  `;
 }
 
 function buildLegalLinks() {

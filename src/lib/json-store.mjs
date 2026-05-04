@@ -42,6 +42,9 @@ export const orderStore = {
   findByStripePaymentIntentId(paymentIntentId) {
     return readOrders().find((entry) => entry.stripe?.paymentIntentId === paymentIntentId) || null;
   },
+  findBySendcloudParcelId(parcelId) {
+    return readOrders().find((entry) => entry.shipping?.shipment?.parcelId === parcelId) || null;
+  },
   save(order) {
     const orders = readOrders();
     const index = orders.findIndex((entry) => entry.orderNumber === order.orderNumber);

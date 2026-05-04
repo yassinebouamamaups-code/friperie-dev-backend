@@ -4,8 +4,9 @@ import { config } from "./config.mjs";
 import { loadCatalog } from "./lib/catalog.mjs";
 import { getUnavailableProductIds } from "./lib/inventory.mjs";
 import { capturePayPalOrder, createPayPalOrder, verifyWebhook } from "./lib/paypal.mjs";
+import { listConfiguredShippingOptions } from "./lib/sendcloud.mjs";
 import { createStripeCheckoutSession, retrieveStripeCheckoutSession, verifyStripeWebhookSignature } from "./lib/stripe.mjs";
-import { attachPayPalOrder, attachStripeSession, buildDraftOrder, getOrder, getOrderByPayPalOrderId, getOrderByStripeSessionId, markOrderPaidFromCapture, markOrderPaidFromStripeSession } from "./lib/order-service.mjs";
+import { attachPayPalOrder, attachStripeSession, buildDraftOrder, getOrder, getOrderByPayPalOrderId, getOrderByStripeSessionId, markOrderPaidFromCapture, markOrderPaidFromStripeSession, updateOrderShippingFromWebhook } from "./lib/order-service.mjs";
 import { handleError, noContent, readJsonBody, readRawBody, sendJson, redirect } from "./lib/http.mjs";
 
 const server = http.createServer(async (request, response) => {
@@ -47,6 +48,24 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         unavailableIds: getUnavailableProductIds(catalog)
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/shipping/options") {
+      const payload = await readJsonBody(request);
+      const cart = Array.isArray(payload?.cart) ? payload.cart : [];
+      const customer = payload?.customer || {};
+      const orderAmount = cart.reduce((sum, item) => sum + (parseAmount(item?.unitAmount ?? item?.price) * Math.max(Number(item?.quantity || 1), 1)), 0);
+      const options = listConfiguredShippingOptions({
+        orderAmount,
+        country: customer.country,
+        items: cart
+      });
+
+      sendJson(response, 200, {
+        ok: true,
+        options
       });
       return;
     }
@@ -107,7 +126,8 @@ const server = http.createServer(async (request, response) => {
         invoiceNumber: order.invoiceNumber,
         status: order.status,
         captureId: order.paypal.captureId,
-        invoicePath: order.invoice?.absolutePath || null
+        invoicePath: order.invoice?.absolutePath || null,
+        shipping: order.shipping || null
       });
       return;
     }
@@ -171,10 +191,38 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname.startsWith("/api/orders/") && url.pathname.endsWith("/tracking")) {
+      const orderNumber = decodeURIComponent(url.pathname.split("/")[3] || "");
+      const order = getOrder(orderNumber);
+      sendJson(response, 200, {
+        ok: true,
+        orderNumber: order.orderNumber,
+        shipping: order.shipping || null
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname.startsWith("/api/orders/")) {
       const orderNumber = decodeURIComponent(url.pathname.split("/")[3] || "");
       const order = getOrder(orderNumber);
       sendJson(response, 200, { order });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/sendcloud/webhooks") {
+      const event = await readJsonBody(request);
+      const parcelId = event?.parcel?.id;
+      if (!parcelId) {
+        sendJson(response, 400, { error: "Webhook Sendcloud sans parcel.id." });
+        return;
+      }
+
+      const order = updateOrderShippingFromWebhook(parcelId, event);
+      sendJson(response, 200, {
+        ok: true,
+        orderNumber: order.orderNumber,
+        shippingStatus: order.shipping?.shipment?.statusMessage || ""
+      });
       return;
     }
 
@@ -188,7 +236,8 @@ const server = http.createServer(async (request, response) => {
         orderNumber: localOrder.orderNumber,
         sessionId: remoteSession.id,
         status: remoteSession.status,
-        paymentStatus: remoteSession.payment_status
+        paymentStatus: remoteSession.payment_status,
+        shipping: localOrder.shipping || null
       });
       return;
     }
@@ -244,3 +293,14 @@ const server = http.createServer(async (request, response) => {
 server.listen(config.port, () => {
   console.log(`Payments backend listening on ${config.appBaseUrl}`);
 });
+
+function parseAmount(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/\s/g, "")
+    .replace("EUR", "")
+    .replace(/\u20ac/g, "")
+    .replace(",", ".");
+  const amount = Number.parseFloat(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
