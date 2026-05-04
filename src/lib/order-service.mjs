@@ -291,12 +291,16 @@ function buildShippingSelection(shippingPayload, context) {
   }
 
   const selectedOption = resolveShippingSelection(optionId, context);
+  const selectedServicePoint = selectedOption.requiresServicePoint
+    ? normalizeSelectedServicePoint(shippingPayload?.servicePoint, selectedOption)
+    : null;
   const itemCount = context.items.reduce((sum, item) => sum + item.quantity, 0);
   const packageWeightKg = Number((config.shipping.defaultWeightKg * Math.max(itemCount, 1)).toFixed(3));
 
   return {
     country: clean(context.country || config.shipping.defaultCountry).toUpperCase(),
     selectedOption,
+    selectedServicePoint,
     shippingAmount: selectedOption.shippingAmount,
     package: {
       weightKg: packageWeightKg,
@@ -327,4 +331,23 @@ async function attachShipment(order) {
       }
     };
   }
+}
+
+function normalizeSelectedServicePoint(servicePoint, selectedOption) {
+  const servicePointId = Number.parseInt(clean(servicePoint?.servicePointId ?? servicePoint?.service_point_id ?? servicePoint?.id), 10);
+  if (!Number.isFinite(servicePointId) || servicePointId <= 0) {
+    throw httpError(400, `Choisissez un point relais pour ${selectedOption.label}.`);
+  }
+
+  return {
+    servicePointId,
+    postNumber: clean(servicePoint?.postNumber ?? servicePoint?.post_number),
+    carrier: clean(servicePoint?.carrier),
+    name: clean(servicePoint?.name),
+    street: clean(servicePoint?.street),
+    houseNumber: clean(servicePoint?.houseNumber ?? servicePoint?.house_number),
+    postalCode: clean(servicePoint?.postalCode ?? servicePoint?.postal_code),
+    city: clean(servicePoint?.city),
+    country: clean(servicePoint?.country || config.shipping.defaultCountry).toUpperCase()
+  };
 }

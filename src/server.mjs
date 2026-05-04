@@ -4,7 +4,7 @@ import { config } from "./config.mjs";
 import { loadCatalog } from "./lib/catalog.mjs";
 import { getUnavailableProductIds } from "./lib/inventory.mjs";
 import { capturePayPalOrder, createPayPalOrder, verifyWebhook } from "./lib/paypal.mjs";
-import { listConfiguredShippingOptions } from "./lib/sendcloud.mjs";
+import { getServicePointPickerConfig, listConfiguredShippingOptions } from "./lib/sendcloud.mjs";
 import { createStripeCheckoutSession, retrieveStripeCheckoutSession, verifyStripeWebhookSignature } from "./lib/stripe.mjs";
 import { attachPayPalOrder, attachStripeSession, buildDraftOrder, getOrder, getOrderByPayPalOrderId, getOrderByStripeSessionId, markOrderPaidFromCapture, markOrderPaidFromStripeSession, updateOrderShippingFromWebhook } from "./lib/order-service.mjs";
 import { handleError, noContent, readJsonBody, readRawBody, sendJson, redirect } from "./lib/http.mjs";
@@ -65,7 +65,8 @@ const server = http.createServer(async (request, response) => {
 
       sendJson(response, 200, {
         ok: true,
-        options
+        options,
+        servicePointPicker: getServicePointPickerConfig()
       });
       return;
     }

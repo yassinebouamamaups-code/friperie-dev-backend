@@ -9,6 +9,13 @@ export function isSendcloudEnabled() {
   return Boolean(config.sendcloud.publicKey && config.sendcloud.secretKey);
 }
 
+export function getServicePointPickerConfig() {
+  return {
+    enabled: Boolean(config.sendcloud.publicKey),
+    publicKey: clean(config.sendcloud.publicKey)
+  };
+}
+
 export function listConfiguredShippingOptions({ orderAmount = 0, country = "", items = [] } = {}) {
   const normalizedCountry = normalizeCountryCode(country || config.shipping.defaultCountry);
 
@@ -97,7 +104,8 @@ export function applyShipmentTrackingUpdate(order, webhookPayload) {
 
 async function resolveLiveShippingMethod(selectedOption, order) {
   const methods = await fetchShippingMethods({
-    country: order.shipping?.country || config.shipping.defaultCountry
+    country: order.shipping?.country || config.shipping.defaultCountry,
+    servicePointId: order.shipping?.selectedServicePoint?.servicePointId || ""
   });
 
   const matched = methods.find((method) => shippingMethodMatchesOption(method, selectedOption));
@@ -110,14 +118,23 @@ async function resolveLiveShippingMethod(selectedOption, order) {
   return matched;
 }
 
-async function fetchShippingMethods({ country }) {
+async function fetchShippingMethods({ country, servicePointId = "" }) {
   const normalizedCountry = normalizeCountryCode(country || config.shipping.defaultCountry);
-  if (shippingMethodsCache.has(normalizedCountry)) {
-    return shippingMethodsCache.get(normalizedCountry);
+  const normalizedServicePointId = clean(servicePointId);
+  const cacheKey = normalizedServicePointId
+    ? `service-point:${normalizedServicePointId}`
+    : `country:${normalizedCountry}`;
+
+  if (shippingMethodsCache.has(cacheKey)) {
+    return shippingMethodsCache.get(cacheKey);
   }
 
   const query = new URLSearchParams();
-  if (normalizedCountry) query.set("to_country", normalizedCountry);
+  if (normalizedServicePointId) {
+    query.set("service_point_id", normalizedServicePointId);
+  } else if (normalizedCountry) {
+    query.set("to_country", normalizedCountry);
+  }
   const senderAddress = clean(config.sendcloud.senderAddressId);
   if (senderAddress) query.set("sender_address", senderAddress);
 
@@ -126,19 +143,36 @@ async function fetchShippingMethods({ country }) {
   });
 
   const methods = Array.isArray(response?.shipping_methods) ? response.shipping_methods : [];
-  shippingMethodsCache.set(normalizedCountry, methods);
+  shippingMethodsCache.set(cacheKey, methods);
   return methods;
 }
 
 async function createParcel(order, shippingMethod) {
+  const selectedServicePoint = normalizeOrderServicePoint(order.shipping?.selectedServicePoint);
+  const destinationAddress = selectedServicePoint
+    ? {
+        address: [selectedServicePoint.street, selectedServicePoint.houseNumber].filter(Boolean).join(" ").trim(),
+        city: selectedServicePoint.city,
+        postalCode: selectedServicePoint.postalCode,
+        country: selectedServicePoint.country || order.shipping?.country || config.shipping.defaultCountry,
+        companyName: selectedServicePoint.name
+      }
+    : {
+        address: order.customer.addressLine1,
+        city: order.customer.city,
+        postalCode: order.customer.postalCode,
+        country: order.shipping?.country || config.shipping.defaultCountry,
+        companyName: ""
+      };
+
   const parcelPayload = {
     parcel: {
       name: `${order.customer.firstName} ${order.customer.lastName}`.trim(),
-      company_name: "",
-      address: order.customer.addressLine1,
-      city: order.customer.city,
-      postal_code: order.customer.postalCode,
-      country: order.shipping?.country || config.shipping.defaultCountry,
+      company_name: destinationAddress.companyName,
+      address: destinationAddress.address,
+      city: destinationAddress.city,
+      postal_code: destinationAddress.postalCode,
+      country: destinationAddress.country,
       email: order.customer.email,
       telephone: order.customer.phone,
       order_number: order.orderNumber,
@@ -164,6 +198,13 @@ async function createParcel(order, shippingMethod) {
 
   if (clean(config.sendcloud.senderAddressId)) {
     parcelPayload.parcel.sender_address = Number.parseInt(config.sendcloud.senderAddressId, 10);
+  }
+
+  if (selectedServicePoint) {
+    parcelPayload.parcel.to_service_point = selectedServicePoint.servicePointId;
+    if (selectedServicePoint.postNumber) {
+      parcelPayload.parcel.to_post_number = selectedServicePoint.postNumber;
+    }
   }
 
   const response = await sendcloudRequest("/parcels", {
@@ -214,6 +255,7 @@ function normalizeShippingOptionsConfig() {
   return configured.map((entry, index) => ({
     id: clean(entry?.id) || `shipping-option-${index + 1}`,
     label: clean(entry?.label) || "Livraison",
+    type: clean(entry?.type).toLowerCase() === "service_point" ? "service_point" : "home",
     carrier: clean(entry?.carrier),
     description: clean(entry?.description),
     price: parseNumber(entry?.price, 0),
@@ -223,6 +265,7 @@ function normalizeShippingOptionsConfig() {
     estimatedDaysMin: parseInteger(entry?.estimatedDaysMin, null),
     estimatedDaysMax: parseInteger(entry?.estimatedDaysMax, null),
     country: normalizeCountryCode(entry?.country || config.shipping.defaultCountry),
+    pickerCarriers: normalizePickerCarriers(entry?.pickerCarriers ?? entry?.pickerCarrierCodes),
     matcher: {
       carrier: clean(entry?.matcher?.carrier).toLowerCase(),
       nameIncludes: clean(entry?.matcher?.nameIncludes).toLowerCase()
@@ -241,6 +284,7 @@ function buildCheckoutShippingOption(option, orderAmount, items) {
     estimatedLabel: buildEstimatedLabel(option.estimatedDaysMin, option.estimatedDaysMax),
     shippingAmount,
     qualifiesForFreeShipping,
+    requiresServicePoint: option.type === "service_point",
     package: {
       itemsCount: totalItems,
       weightKg: Number((config.shipping.defaultWeightKg * Math.max(totalItems || 1, 1)).toFixed(3))
@@ -291,6 +335,38 @@ function parseNumber(value, fallback) {
 function parseInteger(value, fallback) {
   const amount = Number.parseInt(clean(value), 10);
   return Number.isFinite(amount) ? amount : fallback;
+}
+
+function normalizePickerCarriers(value) {
+  const carriers = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+  return carriers
+    .map((entry) => clean(entry).toLowerCase())
+    .filter(Boolean);
+}
+
+function normalizeOrderServicePoint(value) {
+  const servicePointId = Number.parseInt(clean(value?.servicePointId ?? value?.service_point_id ?? value?.id), 10);
+  if (!Number.isFinite(servicePointId) || servicePointId <= 0) {
+    return null;
+  }
+
+  return {
+    servicePointId,
+    postNumber: clean(value?.postNumber ?? value?.post_number),
+    carrier: clean(value?.carrier),
+    name: clean(value?.name),
+    street: clean(value?.street),
+    houseNumber: clean(value?.houseNumber ?? value?.house_number),
+    postalCode: clean(value?.postalCode ?? value?.postal_code),
+    city: clean(value?.city),
+    country: normalizeCountryCode(value?.country || config.shipping.defaultCountry)
+  };
 }
 
 function clean(value) {
