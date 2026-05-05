@@ -133,7 +133,7 @@ function defaultSendcloudShippingOptions() {
       type: "home",
       carrier: "Colissimo",
       description: "Livraison a domicile avec suivi.",
-      price: 5.9,
+      price: 3.99,
       freeAboveOrderAmount: 50,
       estimatedDaysMin: 2,
       estimatedDaysMax: 3,
@@ -149,7 +149,7 @@ function defaultSendcloudShippingOptions() {
       type: "service_point",
       carrier: "Colissimo",
       description: "Retrait en point relais avec suivi.",
-      price: 4.9,
+      price: 3.99,
       freeAboveOrderAmount: 50,
       estimatedDaysMin: 2,
       estimatedDaysMax: 3,
@@ -166,7 +166,7 @@ function defaultSendcloudShippingOptions() {
       type: "service_point",
       carrier: "Mondial Relay",
       description: "Retrait en point relais proche de chez vous.",
-      price: 4.4,
+      price: 3.99,
       freeAboveOrderAmount: 50,
       estimatedDaysMin: 3,
       estimatedDaysMax: 4,
@@ -174,6 +174,23 @@ function defaultSendcloudShippingOptions() {
       pickerCarriers: ["mondial_relay"],
       matcher: {
         carrier: "mondial",
+        nameIncludes: ""
+      }
+    },
+    {
+      id: "chronopost-relay",
+      label: "Chronopost point relais",
+      type: "service_point",
+      carrier: "Chronopost",
+      description: "Retrait rapide en point relais avec suivi.",
+      price: 3.99,
+      freeAboveOrderAmount: 50,
+      estimatedDaysMin: 1,
+      estimatedDaysMax: 2,
+      country: "FR",
+      pickerCarriers: ["chronopost"],
+      matcher: {
+        carrier: "chronopost",
         nameIncludes: ""
       }
     },
