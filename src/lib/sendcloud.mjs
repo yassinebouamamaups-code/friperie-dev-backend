@@ -167,7 +167,8 @@ async function createShipment(order, shippingMethod) {
   const selectedServicePoint = normalizeOrderServicePoint(order.shipping?.selectedServicePoint);
   const senderAddressId = normalizeSenderAddressId(config.sendcloud.senderAddressId);
   const shippingOptionCode = clean(
-    shippingMethod?.shipping_option_code
+    await resolveShippingOptionCode(shippingMethod)
+    || shippingMethod?.shipping_option_code
     || shippingMethod?.code
     || shippingMethod?.shipping_product_code
   );
@@ -253,6 +254,23 @@ async function createShipment(order, shippingMethod) {
   }
 
   return shipment;
+}
+
+async function resolveShippingOptionCode(shippingMethod) {
+  const shippingMethodId = Number.parseInt(clean(shippingMethod?.id), 10);
+  if (!Number.isFinite(shippingMethodId) || shippingMethodId <= 0) {
+    return "";
+  }
+
+  const response = await sendcloudRequestV3("/compat/shipping-options", {
+    method: "POST",
+    body: {
+      shipping_method_ids: [shippingMethodId]
+    }
+  });
+
+  const mappedValue = response?.data?.[String(shippingMethodId)];
+  return clean(mappedValue === "null" ? "" : mappedValue);
 }
 
 async function sendcloudRequestV2(path, { method = "GET", body } = {}) {
