@@ -165,7 +165,6 @@ async function fetchShippingMethods({ country, servicePointId = "" }) {
 
 async function createShipment(order, shippingMethod) {
   const selectedServicePoint = normalizeOrderServicePoint(order.shipping?.selectedServicePoint);
-  const senderAddressId = normalizeSenderAddressId(config.sendcloud.senderAddressId);
   const shippingOptionCode = clean(
     await resolveShippingOptionCode(shippingMethod)
     || shippingMethod?.shipping_option_code
@@ -195,7 +194,6 @@ async function createShipment(order, shippingMethod) {
         shipping_option_code: shippingOptionCode
       }
     },
-    from_address: buildV3SenderAddress(senderAddressId),
     to_address: buildV3RecipientAddress(order.customer),
     parcels: [
       {
@@ -232,6 +230,11 @@ async function createShipment(order, shippingMethod) {
       dpi: 72
     }
   };
+
+  const senderAddress = buildV3SenderAddress();
+  if (senderAddress) {
+    shipmentPayload.from_address = senderAddress;
+  }
 
   if (selectedServicePoint) {
     shipmentPayload.to_service_point = {
@@ -308,17 +311,17 @@ async function sendcloudRequest(url, { method = "GET", body } = {}) {
   return payload;
 }
 
-function buildV3SenderAddress(senderAddressId) {
-  if (senderAddressId === "all") {
-    return {
-      sender_address_id: "all"
-    };
-  }
+function buildV3SenderAddress() {
+  const requiredFields = [
+    config.seller.brandName,
+    config.seller.addressLine1,
+    config.seller.postalCode,
+    config.seller.city,
+    config.seller.country
+  ];
 
-  if (Number.isInteger(senderAddressId) && senderAddressId > 0) {
-    return {
-      sender_address_id: senderAddressId
-    };
+  if (requiredFields.some((value) => !clean(value))) {
+    return null;
   }
 
   return {
@@ -364,15 +367,6 @@ function splitStreetAndHouseNumber(value) {
     houseNumber: clean(match[1]),
     street: clean(match[2])
   };
-}
-
-function normalizeSenderAddressId(value) {
-  const normalized = clean(value);
-  if (!normalized) return null;
-  if (normalized.toLowerCase() === "all") return "all";
-
-  const parsed = Number.parseInt(normalized, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function toDimensionValue(value) {
