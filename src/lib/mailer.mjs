@@ -66,6 +66,32 @@ export async function sendOrderEmails(order, invoice) {
   });
 }
 
+export async function sendShippingStatusEmail(order) {
+  const trackingLink = buildTrackingLink(order);
+  const shipment = order.shipping?.shipment || {};
+  const statusLabel = clean(shipment.statusMessage) || "Mise a jour de livraison";
+  const selectedServicePoint = order.shipping?.selectedServicePoint;
+  const pickupHint = selectedServicePoint && normalizeStatusLabel(statusLabel) === "awaiting customer pickup"
+    ? `<p>Votre colis vous attend au point relais <strong>${escapeHtml(selectedServicePoint.name || "")}</strong>${formatServicePointLine(selectedServicePoint)}.</p>`
+    : "";
+
+  await sendEmail({
+    to: order.customer.email,
+    subject: `${order.orderNumber} - ${statusLabel}`,
+    html: wrapEmail(`
+      <p>Bonjour ${escapeHtml(order.customer.firstName)},</p>
+      <p>Le statut de votre livraison vient d'etre mis a jour.</p>
+      <p>Commande : <strong>${escapeHtml(order.orderNumber)}</strong><br>Statut : <strong>${escapeHtml(statusLabel)}</strong></p>
+      ${buildShippingSummary(order, { audience: "client" })}
+      ${pickupHint}
+      ${trackingLink ? `<p><strong>Suivi de livraison :</strong><br><a href="${escapeHtml(trackingLink)}">${escapeHtml(trackingLink)}</a></p>` : ""}
+      ${buildLegalLinks()}
+    `),
+    replyTo: config.seller.email,
+    debugLabel: `client-shipping-status:${order.orderNumber}`
+  });
+}
+
 async function sendEmail(message) {
   if (config.email.mode !== "live") {
     console.log("[email:log]", JSON.stringify(message, null, 2));
@@ -174,6 +200,10 @@ function cleanLink(value) {
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+function normalizeStatusLabel(value) {
+  return clean(value).toLowerCase();
 }
 
 function buildLegalLinks() {

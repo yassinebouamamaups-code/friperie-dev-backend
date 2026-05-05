@@ -218,7 +218,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const order = updateOrderShippingFromWebhook(parcelId, event);
+      const order = await updateOrderShippingFromWebhook(parcelId, event);
       sendJson(response, 200, {
         ok: true,
         orderNumber: order.orderNumber,

@@ -4,7 +4,7 @@ import { orderStore } from "./json-store.mjs";
 import { findCatalogItems, loadCatalog } from "./catalog.mjs";
 import { httpError } from "./http.mjs";
 import { isProductUnavailable, markItemsUnavailable } from "./inventory.mjs";
-import { sendOrderEmails } from "./mailer.mjs";
+import { sendOrderEmails, sendShippingStatusEmail } from "./mailer.mjs";
 import { writeInvoice } from "./invoice.mjs";
 import { applyShipmentTrackingUpdate, createShipmentForOrder, resolveShippingSelection } from "./sendcloud.mjs";
 
@@ -57,7 +57,8 @@ export async function buildDraftOrder(payload) {
     },
     invoice: null,
     notifications: {
-      emailedAt: null
+      emailedAt: null,
+      shippingStatusEmails: []
     }
   };
 
@@ -218,10 +219,30 @@ export function getOrderBySendcloudParcelId(parcelId) {
   return order;
 }
 
-export function updateOrderShippingFromWebhook(parcelId, webhookPayload) {
+export async function updateOrderShippingFromWebhook(parcelId, webhookPayload) {
   const existing = getOrderBySendcloudParcelId(parcelId);
   const next = applyShipmentTrackingUpdate(existing, webhookPayload);
   orderStore.save(next);
+
+  const notificationKey = buildShipmentNotificationKey(next.shipping?.shipment);
+  const sentKeys = Array.isArray(next.notifications?.shippingStatusEmails)
+    ? next.notifications.shippingStatusEmails
+    : [];
+
+  if (
+    notificationKey
+    && notificationKey !== buildShipmentNotificationKey(existing.shipping?.shipment)
+    && !sentKeys.includes(notificationKey)
+    && shouldNotifyCustomerForShipment(next.shipping?.shipment)
+  ) {
+    await sendShippingStatusEmail(next);
+    next.notifications = {
+      ...next.notifications,
+      shippingStatusEmails: [...sentKeys, notificationKey]
+    };
+    orderStore.save(next);
+  }
+
   return next;
 }
 
@@ -331,6 +352,32 @@ async function attachShipment(order) {
       }
     };
   }
+}
+
+function shouldNotifyCustomerForShipment(shipment) {
+  const normalizedMessage = clean(shipment?.statusMessage).toLowerCase();
+  if (!normalizedMessage) {
+    return false;
+  }
+
+  return [
+    "ready to send",
+    "parcel en route",
+    "awaiting customer pickup",
+    "delivered",
+    "delivery attempt failed",
+    "unable to deliver",
+    "returned to sender"
+  ].includes(normalizedMessage);
+}
+
+function buildShipmentNotificationKey(shipment) {
+  const statusCode = shipment?.statusCode == null ? "" : String(shipment.statusCode);
+  const statusMessage = clean(shipment?.statusMessage).toLowerCase();
+  if (!statusCode && !statusMessage) {
+    return "";
+  }
+  return `${statusCode}:${statusMessage}`;
 }
 
 function normalizeSelectedServicePoint(servicePoint, selectedOption) {
