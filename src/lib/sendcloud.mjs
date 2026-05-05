@@ -5,6 +5,7 @@ import { httpError } from "./http.mjs";
 const SENDCLOUD_API_V2_BASE = "https://panel.sendcloud.sc/api/v2";
 const SENDCLOUD_API_V3_BASE = "https://panel.sendcloud.sc/api/v3";
 const shippingMethodsCache = new Map();
+let senderAddressCache = null;
 
 export function isSendcloudEnabled() {
   return Boolean(config.sendcloud.publicKey && config.sendcloud.secretKey);
@@ -231,7 +232,7 @@ async function createShipment(order, shippingMethod) {
     }
   };
 
-  const senderAddress = buildV3SenderAddress();
+  const senderAddress = await buildV3SenderAddress();
   if (senderAddress) {
     shipmentPayload.from_address = senderAddress;
   }
@@ -311,30 +312,43 @@ async function sendcloudRequest(url, { method = "GET", body } = {}) {
   return payload;
 }
 
-function buildV3SenderAddress() {
-  const requiredFields = [
-    config.seller.brandName,
-    config.seller.addressLine1,
-    config.seller.postalCode,
-    config.seller.city,
-    config.seller.country
-  ];
-
-  if (requiredFields.some((value) => !clean(value))) {
+async function buildV3SenderAddress() {
+  const senderAddressId = await resolveSenderAddressId();
+  if (!senderAddressId) {
     return null;
   }
 
   return {
-    name: config.seller.brandName || "La Goutte de Mer Shop",
-    company_name: config.seller.brandName || "La Goutte de Mer Shop",
-    address_line_1: config.seller.addressLine1,
-    house_number: "",
-    postal_code: config.seller.postalCode,
-    city: config.seller.city,
-    country_code: normalizeCountryCode(config.seller.country || config.shipping.defaultCountry),
-    phone_number: config.seller.phone,
-    email: config.seller.email
+    sender_address_id: senderAddressId
   };
+}
+
+async function resolveSenderAddressId() {
+  if (Number.isInteger(senderAddressCache) && senderAddressCache > 0) {
+    return senderAddressCache;
+  }
+
+  const configured = Number.parseInt(clean(config.sendcloud.senderAddressId), 10);
+  if (Number.isInteger(configured) && configured > 0) {
+    senderAddressCache = configured;
+    return configured;
+  }
+
+  const response = await sendcloudRequestV2("/user/addresses/sender", {
+    method: "GET"
+  });
+
+  const addresses = Array.isArray(response?.sender_addresses) ? response.sender_addresses : [];
+  const defaultAddress = addresses.find((address) => Boolean(address?.default));
+  const firstAddress = defaultAddress || addresses[0];
+  const resolvedId = Number.parseInt(clean(firstAddress?.id), 10);
+
+  if (Number.isInteger(resolvedId) && resolvedId > 0) {
+    senderAddressCache = resolvedId;
+    return resolvedId;
+  }
+
+  return null;
 }
 
 function buildV3RecipientAddress(customer) {
