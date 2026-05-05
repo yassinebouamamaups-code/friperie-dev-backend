@@ -2,7 +2,8 @@ import { Buffer } from "node:buffer";
 import { config } from "../config.mjs";
 import { httpError } from "./http.mjs";
 
-const SENDCLOUD_API_BASE = "https://panel.sendcloud.sc/api/v2";
+const SENDCLOUD_API_V2_BASE = "https://panel.sendcloud.sc/api/v2";
+const SENDCLOUD_API_V3_BASE = "https://panel.sendcloud.sc/api/v3";
 const shippingMethodsCache = new Map();
 
 export function isSendcloudEnabled() {
@@ -52,7 +53,9 @@ export async function createShipmentForOrder(order) {
 
   const selectedOption = order.shipping.selectedOption;
   const shippingMethod = await resolveLiveShippingMethod(selectedOption, order);
-  const createdParcel = await createParcel(order, shippingMethod);
+  const createdShipment = await createShipment(order, shippingMethod);
+  const firstParcel = firstShipmentParcel(createdShipment);
+  const labelLink = findShipmentLabelLink(createdShipment, firstParcel);
 
   return {
     enabled: true,
@@ -62,16 +65,29 @@ export async function createShipmentForOrder(order) {
     optionLabel: selectedOption.label,
     carrier: shippingMethod.carrier || selectedOption.carrier || "",
     shippingMethodId: shippingMethod.id || null,
+    shippingOptionCode: clean(
+      shippingMethod.shipping_option_code
+      || shippingMethod.code
+      || shippingMethod.shipping_product_code
+    ),
+    shipmentId: clean(createdShipment?.id) || null,
     shippingMethodName: shippingMethod.name || "",
-    parcelId: createdParcel.id || null,
-    trackingNumber: createdParcel.tracking_number || "",
-    trackingUrl: createdParcel.tracking_url || "",
-    sendcloudTrackingUrl: createdParcel.tracking_url || "",
-    label: createdParcel.label || null,
-    statusMessage: createdParcel.status?.message || "Ready to send",
-    statusCode: createdParcel.status?.id || null,
-    estimatedDeliveryDate: createdParcel.expected_delivery_date || null,
-    rawParcel: createdParcel
+    parcelId: firstParcel?.id || null,
+    trackingNumber: firstParcel?.tracking_number || "",
+    trackingUrl: firstParcel?.tracking_url || "",
+    sendcloudTrackingUrl: firstParcel?.tracking_url || "",
+    label: labelLink
+      ? {
+          normal_printer: labelLink,
+          printer: labelLink,
+          label_printer: labelLink
+        }
+      : null,
+    statusMessage: firstParcel?.status?.message || "Ready to send",
+    statusCode: firstParcel?.status?.code || "",
+    estimatedDeliveryDate: firstParcel?.expected_delivery_date || null,
+    rawShipment: createdShipment,
+    rawParcel: firstParcel || null
   };
 }
 
@@ -138,7 +154,7 @@ async function fetchShippingMethods({ country, servicePointId = "" }) {
   const senderAddress = clean(config.sendcloud.senderAddressId);
   if (senderAddress) query.set("sender_address", senderAddress);
 
-  const response = await sendcloudRequest(`/shipping_methods${query.size ? `?${query}` : ""}`, {
+  const response = await sendcloudRequestV2(`/shipping_methods${query.size ? `?${query}` : ""}`, {
     method: "GET"
   });
 
@@ -147,82 +163,109 @@ async function fetchShippingMethods({ country, servicePointId = "" }) {
   return methods;
 }
 
-async function createParcel(order, shippingMethod) {
+async function createShipment(order, shippingMethod) {
   const selectedServicePoint = normalizeOrderServicePoint(order.shipping?.selectedServicePoint);
-  const destinationAddress = selectedServicePoint
-    ? {
-        address: [selectedServicePoint.street, selectedServicePoint.houseNumber].filter(Boolean).join(" ").trim(),
-        city: selectedServicePoint.city,
-        postalCode: selectedServicePoint.postalCode,
-        country: selectedServicePoint.country || order.shipping?.country || config.shipping.defaultCountry,
-        companyName: selectedServicePoint.name
-      }
-    : {
-        address: order.customer.addressLine1,
-        city: order.customer.city,
-        postalCode: order.customer.postalCode,
-        country: order.shipping?.country || config.shipping.defaultCountry,
-        companyName: ""
-      };
+  const senderAddressId = normalizeSenderAddressId(config.sendcloud.senderAddressId);
+  const shippingOptionCode = clean(
+    shippingMethod?.shipping_option_code
+    || shippingMethod?.code
+    || shippingMethod?.shipping_product_code
+  );
 
-  const parcelPayload = {
-    parcel: {
-      name: `${order.customer.firstName} ${order.customer.lastName}`.trim(),
-      company_name: destinationAddress.companyName,
-      address: destinationAddress.address,
-      city: destinationAddress.city,
-      postal_code: destinationAddress.postalCode,
-      country: destinationAddress.country,
-      email: order.customer.email,
-      telephone: order.customer.phone,
-      order_number: order.orderNumber,
-      external_reference: order.orderNumber,
-      shipping_method: shippingMethod.id,
-      weight: Number((order.shipping?.package?.weightKg || config.shipping.defaultWeightKg).toFixed(3)),
-      length: Math.round(order.shipping?.package?.lengthCm || config.shipping.defaultLengthCm),
-      width: Math.round(order.shipping?.package?.widthCm || config.shipping.defaultWidthCm),
-      height: Math.round(order.shipping?.package?.heightCm || config.shipping.defaultHeightCm),
-      request_label: true,
-      quantity: order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 1,
-      parcel_items: order.items.map((item) => ({
-        description: item.name,
-        quantity: item.quantity,
-        value: Number(item.unitAmount || 0),
-        weight: Number((((order.shipping?.package?.weightKg || config.shipping.defaultWeightKg) / Math.max(order.items.length, 1))).toFixed(3)),
-        sku: item.id,
-        hs_code: "",
-        origin_country: "FR"
-      }))
+  if (!shippingOptionCode) {
+    throw httpError(
+      502,
+      `La methode Sendcloud ${clean(shippingMethod?.name) || clean(shippingMethod?.id)} ne fournit pas de shipping_option_code compatible avec l'API v3.`,
+      shippingMethod
+    );
+  }
+
+  const shipmentPayload = {
+    order_number: order.orderNumber,
+    external_reference_id: order.orderNumber,
+    reference: order.invoiceNumber,
+    total_order_price: {
+      currency: "EUR",
+      value: order.totalAmount.toFixed(2)
+    },
+    ship_with: {
+      type: "shipping_option_code",
+      properties: {
+        shipping_option_code: shippingOptionCode
+      }
+    },
+    from_address: buildV3SenderAddress(senderAddressId),
+    to_address: buildV3RecipientAddress(order.customer),
+    parcels: [
+      {
+        quantity: order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 1,
+        dimensions: {
+          length: toDimensionValue(order.shipping?.package?.lengthCm || config.shipping.defaultLengthCm),
+          width: toDimensionValue(order.shipping?.package?.widthCm || config.shipping.defaultWidthCm),
+          height: toDimensionValue(order.shipping?.package?.heightCm || config.shipping.defaultHeightCm),
+          unit: "cm"
+        },
+        weight: {
+          value: toWeightValue(order.shipping?.package?.weightKg || config.shipping.defaultWeightKg),
+          unit: "kg"
+        },
+        parcel_items: order.items.map((item) => ({
+          item_id: clean(item.id) || undefined,
+          description: item.name,
+          quantity: item.quantity,
+          sku: clean(item.id) || undefined,
+          origin_country: "FR",
+          weight: {
+            value: toWeightValue((order.shipping?.package?.weightKg || config.shipping.defaultWeightKg) / Math.max(order.items.length, 1)),
+            unit: "kg"
+          },
+          price: {
+            value: Number(item.unitAmount || 0).toFixed(2),
+            currency: "EUR"
+          }
+        }))
+      }
+    ],
+    label_details: {
+      mime_type: "application/pdf",
+      dpi: 72
     }
   };
 
-  if (clean(config.sendcloud.senderAddressId)) {
-    parcelPayload.parcel.sender_address = Number.parseInt(config.sendcloud.senderAddressId, 10);
-  }
-
   if (selectedServicePoint) {
-    parcelPayload.parcel.to_service_point = selectedServicePoint.servicePointId;
+    shipmentPayload.to_service_point = {
+      id: selectedServicePoint.servicePointId
+    };
+
     if (selectedServicePoint.postNumber) {
-      parcelPayload.parcel.to_post_number = selectedServicePoint.postNumber;
+      shipmentPayload.to_service_point.carrier_service_point_id = selectedServicePoint.postNumber;
     }
   }
 
-  const response = await sendcloudRequest("/parcels", {
+  const response = await sendcloudRequestV3("/shipments/announce", {
     method: "POST",
-    body: parcelPayload
+    body: shipmentPayload
   });
 
-  const parcel = response?.parcel;
-  if (!parcel) {
-    throw httpError(502, "Sendcloud n'a pas retourne de colis.", response);
+  const shipment = response?.data;
+  if (!shipment) {
+    throw httpError(502, "Sendcloud n'a pas retourne d'envoi.", response);
   }
 
-  return parcel;
+  return shipment;
 }
 
-async function sendcloudRequest(path, { method = "GET", body } = {}) {
+async function sendcloudRequestV2(path, { method = "GET", body } = {}) {
+  return sendcloudRequest(`${SENDCLOUD_API_V2_BASE}${path}`, { method, body });
+}
+
+async function sendcloudRequestV3(path, { method = "GET", body } = {}) {
+  return sendcloudRequest(`${SENDCLOUD_API_V3_BASE}${path}`, { method, body });
+}
+
+async function sendcloudRequest(url, { method = "GET", body } = {}) {
   const authorization = Buffer.from(`${config.sendcloud.publicKey}:${config.sendcloud.secretKey}`).toString("base64");
-  const response = await fetch(`${SENDCLOUD_API_BASE}${path}`, {
+  const response = await fetch(url, {
     method,
     headers: {
       Authorization: `Basic ${authorization}`,
@@ -245,6 +288,99 @@ async function sendcloudRequest(path, { method = "GET", body } = {}) {
   }
 
   return payload;
+}
+
+function buildV3SenderAddress(senderAddressId) {
+  if (senderAddressId === "all") {
+    return {
+      sender_address_id: "all"
+    };
+  }
+
+  if (Number.isInteger(senderAddressId) && senderAddressId > 0) {
+    return {
+      sender_address_id: senderAddressId
+    };
+  }
+
+  return {
+    name: config.seller.brandName || "La Goutte de Mer Shop",
+    company_name: config.seller.brandName || "La Goutte de Mer Shop",
+    address_line_1: config.seller.addressLine1,
+    house_number: "",
+    postal_code: config.seller.postalCode,
+    city: config.seller.city,
+    country_code: normalizeCountryCode(config.seller.country || config.shipping.defaultCountry),
+    phone_number: config.seller.phone,
+    email: config.seller.email
+  };
+}
+
+function buildV3RecipientAddress(customer) {
+  const { street, houseNumber } = splitStreetAndHouseNumber(customer.addressLine1);
+
+  return {
+    name: `${customer.firstName} ${customer.lastName}`.trim(),
+    company_name: "",
+    address_line_1: street,
+    house_number: houseNumber,
+    postal_code: customer.postalCode,
+    city: customer.city,
+    country_code: normalizeCountryCode(customer.country || config.shipping.defaultCountry),
+    phone_number: customer.phone,
+    email: customer.email
+  };
+}
+
+function splitStreetAndHouseNumber(value) {
+  const address = clean(value);
+  const match = address.match(/^(\d+[^\s,/-]*)\s+(.*)$/);
+  if (!match) {
+    return {
+      street: address,
+      houseNumber: ""
+    };
+  }
+
+  return {
+    houseNumber: clean(match[1]),
+    street: clean(match[2])
+  };
+}
+
+function normalizeSenderAddressId(value) {
+  const normalized = clean(value);
+  if (!normalized) return null;
+  if (normalized.toLowerCase() === "all") return "all";
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function toDimensionValue(value) {
+  const parsed = parseNumber(value, 0);
+  return parsed > 0 ? parsed.toFixed(2) : "0.00";
+}
+
+function toWeightValue(value) {
+  const parsed = parseNumber(value, 0);
+  return parsed > 0 ? parsed.toFixed(3) : "0.000";
+}
+
+function firstShipmentParcel(shipment) {
+  return Array.isArray(shipment?.parcels) ? shipment.parcels[0] || null : null;
+}
+
+function findShipmentLabelLink(shipment, parcel) {
+  const parcelLabel = Array.isArray(parcel?.documents)
+    ? parcel.documents.find((document) => clean(document?.type).toLowerCase() === "label")
+    : null;
+
+  return clean(parcelLabel?.link)
+    || clean(shipment?.label?.normal_printer)
+    || clean(shipment?.label?.printer)
+    || clean(parcel?.label?.normal_printer)
+    || clean(parcel?.label?.printer);
 }
 
 function normalizeShippingOptionsConfig() {
