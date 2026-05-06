@@ -4,7 +4,7 @@ import { config } from "./config.mjs";
 import { loadCatalog } from "./lib/catalog.mjs";
 import { getUnavailableProductIds } from "./lib/inventory.mjs";
 import { capturePayPalOrder, createPayPalOrder, verifyWebhook } from "./lib/paypal.mjs";
-import { getServicePointPickerConfig, listConfiguredShippingOptions } from "./lib/sendcloud.mjs";
+import { fetchShipmentLabelAsset, getServicePointPickerConfig, listConfiguredShippingOptions } from "./lib/sendcloud.mjs";
 import { createStripeCheckoutSession, retrieveStripeCheckoutSession, verifyStripeWebhookSignature } from "./lib/stripe.mjs";
 import { attachPayPalOrder, attachStripeSession, buildDraftOrder, getOrder, getOrderByPayPalOrderId, getOrderByStripeSessionId, markOrderPaidFromCapture, markOrderPaidFromStripeSession, updateOrderShippingFromWebhook } from "./lib/order-service.mjs";
 import { handleError, noContent, readJsonBody, readRawBody, sendJson, redirect } from "./lib/http.mjs";
@@ -200,6 +200,21 @@ const server = http.createServer(async (request, response) => {
         orderNumber: order.orderNumber,
         shipping: order.shipping || null
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/orders/") && url.pathname.endsWith("/shipping-label")) {
+      const orderNumber = decodeURIComponent(url.pathname.split("/")[3] || "");
+      const order = getOrder(orderNumber);
+      const asset = await fetchShipmentLabelAsset(order.shipping?.shipment || null, order.orderNumber);
+
+      response.writeHead(200, {
+        "Content-Type": asset.contentType,
+        "Content-Length": asset.buffer.length,
+        "Content-Disposition": `inline; filename="${asset.fileName}"`,
+        "Access-Control-Allow-Origin": "*"
+      });
+      response.end(asset.buffer);
       return;
     }
 

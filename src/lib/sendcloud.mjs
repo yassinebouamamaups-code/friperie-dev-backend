@@ -119,6 +119,41 @@ export function applyShipmentTrackingUpdate(order, webhookPayload) {
   };
 }
 
+export async function fetchShipmentLabelAsset(shipment, orderNumber = "") {
+  const labelLink = extractShipmentLabelLink(shipment);
+  if (!labelLink) {
+    throw httpError(404, "Etiquette Sendcloud introuvable.");
+  }
+
+  const authorization = Buffer.from(`${config.sendcloud.publicKey}:${config.sendcloud.secretKey}`).toString("base64");
+  const response = await fetch(labelLink, {
+    method: "GET",
+    headers: {
+      Authorization: `Basic ${authorization}`,
+      Accept: "application/pdf",
+      "User-Agent": "friperie-dev-backend/1.0"
+    }
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw httpError(502, "Impossible de telecharger l'etiquette Sendcloud.", {
+      status: response.status,
+      body
+    });
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const contentType = clean(response.headers.get("content-type")) || "application/pdf";
+  const fileName = `${clean(orderNumber) || "shipment-label"}.pdf`;
+
+  return {
+    buffer,
+    contentType,
+    fileName
+  };
+}
+
 async function resolveLiveShippingMethod(selectedOption, order) {
   const methods = await fetchShippingMethods({
     country: order.shipping?.country || config.shipping.defaultCountry,
@@ -407,6 +442,19 @@ function findShipmentLabelLink(shipment, parcel) {
     || clean(shipment?.label?.printer)
     || clean(parcel?.label?.normal_printer)
     || clean(parcel?.label?.printer);
+}
+
+function extractShipmentLabelLink(shipment) {
+  return clean(
+    shipment?.label?.normal_printer
+    || shipment?.label?.printer
+    || shipment?.label?.label_printer
+    || shipment?.rawParcel?.label?.normal_printer
+    || shipment?.rawParcel?.label?.printer
+    || shipment?.rawParcel?.label?.label_printer
+    || shipment?.rawParcel?.label
+    || findShipmentLabelLink(shipment?.rawShipment, shipment?.rawParcel)
+  );
 }
 
 function normalizeShippingOptionsConfig() {

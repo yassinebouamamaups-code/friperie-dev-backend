@@ -55,7 +55,6 @@ export async function sendOrderEmails(order, invoice) {
       ${buildItemsList(order)}
       ${buildShippingSummary(order, { audience: "seller" })}
       ${shippingLabelLink ? `<p><strong>Etiquette d'envoi :</strong><br><a href="${escapeHtml(shippingLabelLink)}">${escapeHtml(shippingLabelLink)}</a></p>` : ""}
-      ${trackingLink ? `<p><strong>Suivi client :</strong><br><a href="${escapeHtml(trackingLink)}">${escapeHtml(trackingLink)}</a></p>` : ""}
       <p>Total : <strong>${escapeHtml(formatPrice(order.totalAmount))}</strong></p>
       <p>Identifiant capture PayPal : ${escapeHtml(order.paypal.captureId || "")}</p>
       ${legalLinks}
@@ -172,16 +171,9 @@ function buildTrackingLink(order) {
 }
 
 function buildShippingLabelLink(order) {
-  const shipment = order.shipping?.shipment;
-  return cleanLink(
-    shipment?.label?.normal_printer
-    || shipment?.label?.printer
-    || shipment?.label?.label_printer
-    || shipment?.rawParcel?.label?.normal_printer
-    || shipment?.rawParcel?.label?.printer
-    || shipment?.rawParcel?.label?.label_printer
-    || shipment?.rawParcel?.label
-  );
+  if (!order.shipping?.shipment) return "";
+  const orderNumber = encodeURIComponent(order.orderNumber || "");
+  return `${config.appBaseUrl}/api/orders/${orderNumber}/shipping-label`;
 }
 
 function formatServicePointLine(servicePoint) {
