@@ -155,15 +155,7 @@ function buildInvoiceFooterLinkHtml(order, options) {
     shipment?.trackingUrl
     || shipment?.sendcloudTrackingUrl
   );
-  const shippingLabelUrl = cleanLink(
-    shipment?.label?.normal_printer
-    || shipment?.label?.printer
-    || shipment?.label?.label_printer
-    || shipment?.rawParcel?.label?.normal_printer
-    || shipment?.rawParcel?.label?.printer
-    || shipment?.rawParcel?.label?.label_printer
-    || shipment?.rawParcel?.label
-  );
+  const shippingLabelUrl = buildShippingLabelLink(order);
 
   if (audience === "seller" && shippingLabelUrl) {
     return `<p class="footer-link">Etiquette d'envoi : <a href="${escapeHtml(shippingLabelUrl)}">Telecharger l'etiquette</a></p>`;
@@ -179,6 +171,12 @@ function buildInvoiceFooterLinkHtml(order, options) {
 function cleanLink(value) {
   const link = String(value || "").trim();
   return /^https?:\/\//i.test(link) ? link : "";
+}
+
+function buildShippingLabelLink(order) {
+  if (!order.shipping?.shipment) return "";
+  const orderNumber = encodeURIComponent(order.orderNumber || "");
+  return cleanLink(`${config.appBaseUrl}/api/orders/${orderNumber}/shipping-label`);
 }
 
 function escapeHtml(value) {
