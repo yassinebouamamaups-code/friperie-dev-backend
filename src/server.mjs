@@ -29,7 +29,8 @@ const server = http.createServer(async (request, response) => {
         service: "payments-backend",
         environment: config.nodeEnv,
         paypalEnvironment: config.paypal.environment,
-        stripeEnvironment: config.stripe.environment
+        stripeEnvironment: config.stripe.environment,
+        stripeCheckoutMode: config.stripe.checkoutMode
       });
       return;
     }
@@ -38,7 +39,8 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         publishableKey: config.stripe.publishableKey || "",
-        enabled: Boolean(config.stripe.publishableKey && config.stripe.secretKey)
+        enabled: Boolean(config.stripe.publishableKey && config.stripe.secretKey),
+        checkoutMode: config.stripe.checkoutMode
       });
       return;
     }
@@ -100,6 +102,8 @@ const server = http.createServer(async (request, response) => {
         invoiceNumber: savedOrder.invoiceNumber,
         stripeSessionId: savedOrder.stripe.sessionId,
         clientSecret: stripeSession.client_secret || "",
+        checkoutUrl: stripeSession.url || "",
+        checkoutMode: config.stripe.checkoutMode,
         totalAmount: savedOrder.totalAmount
       });
       return;

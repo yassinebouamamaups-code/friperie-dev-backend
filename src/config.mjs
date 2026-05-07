@@ -41,6 +41,7 @@ export const config = {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     currency: (process.env.STRIPE_CURRENCY || "eur").toLowerCase(),
+    checkoutMode: normalizeStripeCheckoutMode(process.env.STRIPE_CHECKOUT_MODE || "custom"),
     successPath: process.env.STRIPE_SUCCESS_PATH || "/payment/stripe/success",
     cancelPath: process.env.STRIPE_CANCEL_PATH || "/payment/stripe/cancel"
   },
@@ -123,6 +124,11 @@ function parsePositiveNumber(value, fallback) {
 
 function cleanEnv(value) {
   return String(value || "").trim();
+}
+
+function normalizeStripeCheckoutMode(value) {
+  const normalized = cleanEnv(value).toLowerCase();
+  return normalized === "redirect" ? "redirect" : "custom";
 }
 
 function defaultSendcloudShippingOptions() {
