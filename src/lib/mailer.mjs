@@ -1,5 +1,5 @@
 import { config } from "../config.mjs";
-import { formatPrice } from "./invoice.mjs";
+import { buildInvoiceHtml, formatPrice } from "./invoice.mjs";
 
 export async function sendOrderEmails(order, invoice) {
   const clientName = `${order.customer.firstName} ${order.customer.lastName}`.trim();
@@ -9,9 +9,13 @@ export async function sendOrderEmails(order, invoice) {
   const legalLinks = buildLegalLinks();
   const trackingLink = buildTrackingLink(order);
   const shippingLabelLink = buildShippingLabelLink(order);
-  const invoiceAttachment = {
+  const clientInvoiceAttachment = {
     filename: invoice.fileName,
-    content: Buffer.from(invoice.html, "utf8").toString("base64")
+    content: Buffer.from(buildInvoiceHtml(order, { audience: "client" }), "utf8").toString("base64")
+  };
+  const sellerInvoiceAttachment = {
+    filename: invoice.fileName,
+    content: Buffer.from(buildInvoiceHtml(order, { audience: "seller" }), "utf8").toString("base64")
   };
 
   await sendEmail({
@@ -41,7 +45,7 @@ export async function sendOrderEmails(order, invoice) {
       ${legalLinks}
     `),
     replyTo: config.seller.email,
-    attachments: [invoiceAttachment],
+    attachments: [clientInvoiceAttachment],
     debugLabel: `client-invoice:${clientName}`
   });
 
@@ -60,7 +64,7 @@ export async function sendOrderEmails(order, invoice) {
       ${legalLinks}
     `),
     replyTo: order.customer.email,
-    attachments: [invoiceAttachment],
+    attachments: [sellerInvoiceAttachment],
     debugLabel: "seller-notification"
   });
 }
