@@ -23,7 +23,7 @@ export async function buildDraftOrder(payload) {
     throw httpError(409, `L'article ${soldItem.name} n'est plus disponible.`);
   }
   const itemsSubtotalAmount = items.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
-  const promotion = validatePromotionCode(payload.promoCode, items);
+  const promotion = await validatePromotionCode(payload.promoCode, items);
   const discountedItems = applyPromotionToItems(items, promotion);
   const discountedItemsSubtotalAmount = discountedItems.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
   const shipping = buildShippingSelection(payload.shipping, {

@@ -77,7 +77,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/promotions/validate") {
       const payload = await readJsonBody(request);
       const cart = Array.isArray(payload?.cart) ? payload.cart : [];
-      const promotion = validatePromotionCode(
+      const promotion = await validatePromotionCode(
         payload?.promoCode,
         cart.map((item) => ({
           unitAmount: parseAmount(item?.unitAmount ?? item?.price),
