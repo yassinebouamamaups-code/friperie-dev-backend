@@ -549,27 +549,20 @@ function chooseBestShippingMethod(methods, option, order) {
     return null;
   }
 
-  const preferredKeyword = preferredShippingMethodKeyword(option, order);
-  const keywordMatchedMethods = preferredKeyword
-    ? matchingMethods.filter((method) => shippingMethodContainsKeyword(method, preferredKeyword))
-    : matchingMethods;
-  const prioritizedByKeyword = keywordMatchedMethods.length ? keywordMatchedMethods : matchingMethods;
+  const rankedMethods = matchingMethods
+    .map((method, index) => ({
+      method,
+      index,
+      score: scoreShippingMethod(method, option, order)
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return left.index - right.index;
+    });
 
-  const normalizedCountry = normalizeCountryCode(order?.shipping?.country || config.shipping.defaultCountry);
-  const domesticMethods = normalizedCountry === "FR"
-    ? prioritizedByKeyword.filter((method) => !isInternationalShippingMethod(method))
-    : prioritizedByKeyword;
-  const prioritizedByCountry = domesticMethods.length ? domesticMethods : prioritizedByKeyword;
-
-  const packageWeightKg = getOrderPackageWeightKg(order);
-  const weightMatchedMethods = packageWeightKg > 0
-    ? prioritizedByCountry.filter((method) => shippingMethodSupportsWeight(method, packageWeightKg))
-    : prioritizedByCountry;
-  if (weightMatchedMethods.length) {
-    return weightMatchedMethods[0];
-  }
-
-  return prioritizedByCountry[0];
+  return rankedMethods[0]?.method || matchingMethods[0];
 }
 
 function preferredShippingMethodKeyword(option, order) {
@@ -585,6 +578,25 @@ function preferredShippingMethodKeyword(option, order) {
   }
 
   return "";
+}
+
+function preferredShippingMethodKeywords(option, order) {
+  const keywords = [];
+  const explicitKeyword = preferredShippingMethodKeyword(option, order);
+  if (explicitKeyword) {
+    keywords.push(explicitKeyword);
+  }
+
+  const optionType = clean(option?.type).toLowerCase();
+  if (optionType === "service_point") {
+    keywords.push("relay", "relais", "pickup", "point");
+  }
+
+  if (optionType === "home") {
+    keywords.push("domicile", "home");
+  }
+
+  return Array.from(new Set(keywords.filter(Boolean)));
 }
 
 function shippingMethodContainsKeyword(method, keyword) {
@@ -637,6 +649,38 @@ function shippingMethodSupportsWeight(method, targetWeightKg) {
   }
 
   return true;
+}
+
+function scoreShippingMethod(method, option, order) {
+  let score = 0;
+  const normalizedCountry = normalizeCountryCode(order?.shipping?.country || config.shipping.defaultCountry);
+  const packageWeightKg = getOrderPackageWeightKg(order);
+  const optionType = clean(option?.type).toLowerCase();
+  const servicePointInput = clean(method?.service_point_input).toLowerCase();
+
+  if (normalizedCountry === "FR" && !isInternationalShippingMethod(method)) {
+    score += 40;
+  }
+
+  if (packageWeightKg > 0 && shippingMethodSupportsWeight(method, packageWeightKg)) {
+    score += 35;
+  }
+
+  if (optionType === "service_point" && servicePointInput === "required") {
+    score += 25;
+  }
+
+  if (optionType === "home" && servicePointInput !== "required") {
+    score += 25;
+  }
+
+  for (const keyword of preferredShippingMethodKeywords(option, order)) {
+    if (shippingMethodContainsKeyword(method, keyword)) {
+      score += 10;
+    }
+  }
+
+  return score;
 }
 
 function buildEstimatedLabel(minDays, maxDays) {
