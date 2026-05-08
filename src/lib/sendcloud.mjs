@@ -54,6 +54,13 @@ export async function createShipmentForOrder(order) {
 
   const selectedOption = order.shipping.selectedOption;
   const shippingMethod = await resolveLiveShippingMethod(selectedOption, order);
+  console.log("[sendcloud] shipping method selected", {
+    orderNumber: order.orderNumber,
+    selectedOptionId: selectedOption.id,
+    selectedOptionLabel: selectedOption.label,
+    selectedServicePoint: summarizeServicePoint(order.shipping?.selectedServicePoint),
+    shippingMethod: summarizeShippingMethod(shippingMethod)
+  });
   const createdShipment = await createShipment(order, shippingMethod);
   const firstParcel = firstShipmentParcel(createdShipment);
   const labelLink = findShipmentLabelLink(createdShipment, firstParcel);
@@ -160,6 +167,14 @@ async function resolveLiveShippingMethod(selectedOption, order) {
     servicePointId: order.shipping?.selectedServicePoint?.servicePointId || ""
   });
 
+  console.log("[sendcloud] shipping methods received", {
+    orderNumber: order.orderNumber,
+    selectedOptionId: selectedOption?.id,
+    selectedServicePoint: summarizeServicePoint(order.shipping?.selectedServicePoint),
+    preferredKeyword: preferredShippingMethodKeyword(selectedOption, order),
+    methods: methods.map((method) => summarizeShippingMethod(method))
+  });
+
   const matched = chooseBestShippingMethod(methods, selectedOption, order);
   if (!matched) {
     throw httpError(
@@ -215,6 +230,14 @@ async function createShipment(order, shippingMethod) {
       shippingMethod
     );
   }
+
+  console.log("[sendcloud] shipment announce inputs", {
+    orderNumber: order.orderNumber,
+    selectedOptionId: order.shipping?.selectedOption?.id || "",
+    selectedServicePoint: summarizeServicePoint(selectedServicePoint),
+    shippingMethod: summarizeShippingMethod(shippingMethod),
+    shippingOptionCode
+  });
 
   const shipmentPayload = {
     order_number: order.orderNumber,
@@ -622,6 +645,32 @@ function normalizeOrderServicePoint(value) {
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+function summarizeShippingMethod(method) {
+  return {
+    id: clean(method?.id),
+    name: clean(method?.name),
+    carrier: clean(method?.carrier || method?.carrier_name),
+    code: clean(method?.code),
+    shipping_option_code: clean(method?.shipping_option_code),
+    shipping_product_code: clean(method?.shipping_product_code)
+  };
+}
+
+function summarizeServicePoint(servicePoint) {
+  if (!servicePoint) {
+    return null;
+  }
+
+  return {
+    servicePointId: clean(servicePoint?.servicePointId ?? servicePoint?.id),
+    postNumber: clean(servicePoint?.postNumber),
+    carrier: clean(servicePoint?.carrier),
+    name: clean(servicePoint?.name),
+    postalCode: clean(servicePoint?.postalCode),
+    city: clean(servicePoint?.city)
+  };
 }
 
 function cleanRemoteLink(value) {
