@@ -23,8 +23,16 @@ export async function createStripeCheckoutSession(order) {
   params.set("metadata[order_number]", order.orderNumber);
   params.set("metadata[invoice_number]", order.invoiceNumber);
   params.set("metadata[payment_provider]", "stripe");
+  if (order.promotion?.code) {
+    params.set("metadata[promo_code]", order.promotion.code);
+    params.set("metadata[promo_percent_off]", String(order.promotion.percentOff));
+  }
   params.set("payment_intent_data[metadata][order_number]", order.orderNumber);
   params.set("payment_intent_data[metadata][invoice_number]", order.invoiceNumber);
+  if (order.promotion?.code) {
+    params.set("payment_intent_data[metadata][promo_code]", order.promotion.code);
+    params.set("payment_intent_data[metadata][promo_percent_off]", String(order.promotion.percentOff));
+  }
 
   order.items.forEach((item, index) => {
     params.set(`line_items[${index}][quantity]`, String(item.quantity));

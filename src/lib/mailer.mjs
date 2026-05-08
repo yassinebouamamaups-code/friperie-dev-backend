@@ -211,8 +211,7 @@ function buildLegalLinks() {
     <p style="font-size:14px;color:#6f5f43;margin:0;">
       <a href="${config.siteBaseUrl}/cgv.html">CGV</a> |
       <a href="${config.siteBaseUrl}/confidentialite.html">Politique de confidentialite</a> |
-      <a href="${config.siteBaseUrl}/mentions-legales.html">Mentions legales</a> |
-      <a href="${config.siteBaseUrl}/formulaire-retractation.html">Formulaire de retractation</a>
+      <a href="${config.siteBaseUrl}/mentions-legales.html">Mentions legales</a>
     </p>
   `;
 }

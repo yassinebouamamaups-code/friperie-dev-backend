@@ -12,7 +12,9 @@ export async function createPayPalOrder(order) {
         reference_id: order.orderNumber,
         custom_id: order.orderNumber,
         invoice_id: order.invoiceNumber,
-        description: `Commande ${order.orderNumber}`,
+        description: order.promotion?.code
+          ? `Commande ${order.orderNumber} - promo ${order.promotion.code}`
+          : `Commande ${order.orderNumber}`,
         amount: {
           currency_code: "EUR",
           value: order.totalAmount.toFixed(2),

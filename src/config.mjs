@@ -76,6 +76,10 @@ export const config = {
     secretKey: process.env.SENDCLOUD_SECRET_KEY || "",
     senderAddressId: process.env.SENDCLOUD_SENDER_ADDRESS_ID || "",
     shippingOptions: parseJsonEnv(process.env.SENDCLOUD_SHIPPING_OPTIONS_JSON, defaultSendcloudShippingOptions())
+  },
+  promotions: {
+    sourceUrl: process.env.PROMO_SOURCE_URL || "",
+    codes: parseJsonEnv(process.env.PROMO_CODES_JSON, [])
   }
 };
 

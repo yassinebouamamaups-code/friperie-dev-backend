@@ -6,6 +6,7 @@ import { httpError } from "./http.mjs";
 import { isProductUnavailable, markItemsUnavailable } from "./inventory.mjs";
 import { sendOrderEmails, sendShippingStatusEmail } from "./mailer.mjs";
 import { writeInvoice } from "./invoice.mjs";
+import { applyPromotionToItems, validatePromotionCode } from "./promotions.mjs";
 import { applyShipmentTrackingUpdate, createShipmentForOrder, resolveShippingSelection } from "./sendcloud.mjs";
 
 export async function buildDraftOrder(payload) {
@@ -22,14 +23,17 @@ export async function buildDraftOrder(payload) {
     throw httpError(409, `L'article ${soldItem.name} n'est plus disponible.`);
   }
   const itemsSubtotalAmount = items.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
+  const promotion = validatePromotionCode(payload.promoCode, items);
+  const discountedItems = applyPromotionToItems(items, promotion);
+  const discountedItemsSubtotalAmount = discountedItems.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
   const shipping = buildShippingSelection(payload.shipping, {
     orderAmount: itemsSubtotalAmount,
     country: customer.country || "FR",
-    items
+    items: discountedItems
   });
   const now = new Date();
   const stamp = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-  const totalAmount = itemsSubtotalAmount + (shipping.shippingAmount || 0);
+  const totalAmount = discountedItemsSubtotalAmount + (shipping.shippingAmount || 0);
   const order = {
     id: crypto.randomUUID(),
     orderNumber: `CMD-${stamp}-${Math.floor(Math.random() * 900 + 100)}`,
@@ -39,9 +43,11 @@ export async function buildDraftOrder(payload) {
     status: "draft",
     paymentProvider: clean(payload.paymentProvider || "paypal") || "paypal",
     customer,
-    items,
+    items: discountedItems,
     shipping,
-    itemsSubtotalAmount,
+    itemsSubtotalAmount: discountedItemsSubtotalAmount,
+    originalItemsSubtotalAmount: itemsSubtotalAmount,
+    promotion,
     totalAmount,
     seller: config.seller,
     paypal: {

@@ -4,6 +4,7 @@ import { config } from "./config.mjs";
 import { loadCatalog } from "./lib/catalog.mjs";
 import { getUnavailableProductIds } from "./lib/inventory.mjs";
 import { capturePayPalOrder, createPayPalOrder, verifyWebhook } from "./lib/paypal.mjs";
+import { getActivePromotionBanner, validatePromotionCode } from "./lib/promotions.mjs";
 import { fetchShipmentLabelAsset, getServicePointPickerConfig, listConfiguredShippingOptions } from "./lib/sendcloud.mjs";
 import { createStripeCheckoutSession, retrieveStripeCheckoutSession, verifyStripeWebhookSignature } from "./lib/stripe.mjs";
 import { attachPayPalOrder, attachStripeSession, buildDraftOrder, getOrder, getOrderByPayPalOrderId, getOrderByStripeSessionId, markOrderPaidFromCapture, markOrderPaidFromStripeSession, updateOrderShippingFromWebhook } from "./lib/order-service.mjs";
@@ -69,6 +70,33 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         options,
         servicePointPicker: getServicePointPickerConfig()
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/promotions/validate") {
+      const payload = await readJsonBody(request);
+      const cart = Array.isArray(payload?.cart) ? payload.cart : [];
+      const promotion = validatePromotionCode(
+        payload?.promoCode,
+        cart.map((item) => ({
+          unitAmount: parseAmount(item?.unitAmount ?? item?.price),
+          quantity: Math.max(Number(item?.quantity || 1), 1)
+        }))
+      );
+
+      sendJson(response, 200, {
+        ok: true,
+        promotion
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/promotions/active") {
+      const promotion = await getActivePromotionBanner();
+      sendJson(response, 200, {
+        ok: true,
+        promotion
       });
       return;
     }
