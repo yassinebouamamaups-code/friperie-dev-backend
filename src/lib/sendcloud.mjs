@@ -160,7 +160,7 @@ async function resolveLiveShippingMethod(selectedOption, order) {
     servicePointId: order.shipping?.selectedServicePoint?.servicePointId || ""
   });
 
-  const matched = methods.find((method) => shippingMethodMatchesOption(method, selectedOption));
+  const matched = chooseBestShippingMethod(methods, selectedOption, order);
   if (!matched) {
     throw httpError(
       502,
@@ -437,15 +437,15 @@ function findShipmentLabelLink(shipment, parcel) {
     ? parcel.documents.find((document) => clean(document?.type).toLowerCase() === "label")
     : null;
 
-  return clean(parcelLabel?.link)
-    || clean(shipment?.label?.normal_printer)
-    || clean(shipment?.label?.printer)
-    || clean(parcel?.label?.normal_printer)
-    || clean(parcel?.label?.printer);
+  return cleanRemoteLink(parcelLabel?.link)
+    || cleanRemoteLink(shipment?.label?.normal_printer)
+    || cleanRemoteLink(shipment?.label?.printer)
+    || cleanRemoteLink(parcel?.label?.normal_printer)
+    || cleanRemoteLink(parcel?.label?.printer);
 }
 
 function extractShipmentLabelLink(shipment) {
-  return clean(
+  return cleanRemoteLink(
     shipment?.label?.normal_printer
     || shipment?.label?.printer
     || shipment?.label?.label_printer
@@ -453,6 +453,7 @@ function extractShipmentLabelLink(shipment) {
     || shipment?.rawParcel?.label?.printer
     || shipment?.rawParcel?.label?.label_printer
     || shipment?.rawParcel?.label
+    || shipment?.rawParcel?.documents?.find?.((document) => clean(document?.type).toLowerCase() === "label")?.link
     || findShipmentLabelLink(shipment?.rawShipment, shipment?.rawParcel)
   );
 }
@@ -519,6 +520,46 @@ function shippingMethodMatchesOption(method, option) {
   return true;
 }
 
+function chooseBestShippingMethod(methods, option, order) {
+  const matchingMethods = methods.filter((method) => shippingMethodMatchesOption(method, option));
+  if (!matchingMethods.length) {
+    return null;
+  }
+
+  const preferredKeyword = preferredShippingMethodKeyword(option, order);
+  if (!preferredKeyword) {
+    return matchingMethods[0];
+  }
+
+  const preferredMethod = matchingMethods.find((method) => {
+    const haystack = [
+      clean(method?.name),
+      clean(method?.shipping_option_code),
+      clean(method?.code),
+      clean(method?.shipping_product_code)
+    ].join(" ").toLowerCase();
+
+    return haystack.includes(preferredKeyword);
+  });
+
+  return preferredMethod || matchingMethods[0];
+}
+
+function preferredShippingMethodKeyword(option, order) {
+  const optionId = clean(option?.id).toLowerCase();
+  const servicePoint = order?.shipping?.selectedServicePoint;
+  const servicePointLabel = [
+    clean(servicePoint?.name),
+    clean(servicePoint?.carrier)
+  ].join(" ").toLowerCase();
+
+  if (optionId === "mondial-relay" && /\blocker\b/.test(servicePointLabel)) {
+    return "locker";
+  }
+
+  return "";
+}
+
 function buildEstimatedLabel(minDays, maxDays) {
   if (minDays && maxDays) {
     return minDays === maxDays
@@ -581,4 +622,13 @@ function normalizeOrderServicePoint(value) {
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+function cleanRemoteLink(value) {
+  const normalized = clean(value);
+  if (!normalized) return "";
+  if (["null", "undefined", "[object Object]"].includes(normalized.toLowerCase())) {
+    return "";
+  }
+  return /^https?:\/\//i.test(normalized) ? normalized : "";
 }
