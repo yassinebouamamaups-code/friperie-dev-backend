@@ -550,22 +550,26 @@ function chooseBestShippingMethod(methods, option, order) {
   }
 
   const preferredKeyword = preferredShippingMethodKeyword(option, order);
-  if (!preferredKeyword) {
-    return matchingMethods[0];
+  const keywordMatchedMethods = preferredKeyword
+    ? matchingMethods.filter((method) => shippingMethodContainsKeyword(method, preferredKeyword))
+    : matchingMethods;
+  const prioritizedByKeyword = keywordMatchedMethods.length ? keywordMatchedMethods : matchingMethods;
+
+  const normalizedCountry = normalizeCountryCode(order?.shipping?.country || config.shipping.defaultCountry);
+  const domesticMethods = normalizedCountry === "FR"
+    ? prioritizedByKeyword.filter((method) => !isInternationalShippingMethod(method))
+    : prioritizedByKeyword;
+  const prioritizedByCountry = domesticMethods.length ? domesticMethods : prioritizedByKeyword;
+
+  const packageWeightKg = getOrderPackageWeightKg(order);
+  const weightMatchedMethods = packageWeightKg > 0
+    ? prioritizedByCountry.filter((method) => shippingMethodSupportsWeight(method, packageWeightKg))
+    : prioritizedByCountry;
+  if (weightMatchedMethods.length) {
+    return weightMatchedMethods[0];
   }
 
-  const preferredMethod = matchingMethods.find((method) => {
-    const haystack = [
-      clean(method?.name),
-      clean(method?.shipping_option_code),
-      clean(method?.code),
-      clean(method?.shipping_product_code)
-    ].join(" ").toLowerCase();
-
-    return haystack.includes(preferredKeyword);
-  });
-
-  return preferredMethod || matchingMethods[0];
+  return prioritizedByCountry[0];
 }
 
 function preferredShippingMethodKeyword(option, order) {
@@ -581,6 +585,58 @@ function preferredShippingMethodKeyword(option, order) {
   }
 
   return "";
+}
+
+function shippingMethodContainsKeyword(method, keyword) {
+  const normalizedKeyword = clean(keyword).toLowerCase();
+  if (!normalizedKeyword) {
+    return false;
+  }
+
+  const haystack = [
+    clean(method?.name),
+    clean(method?.shipping_option_code),
+    clean(method?.code),
+    clean(method?.shipping_product_code)
+  ].join(" ").toLowerCase();
+
+  return haystack.includes(normalizedKeyword);
+}
+
+function isInternationalShippingMethod(method) {
+  return shippingMethodContainsKeyword(method, "international");
+}
+
+function getOrderPackageWeightKg(order) {
+  return parseNumber(
+    order?.shipping?.package?.weightKg
+    || order?.shipping?.selectedOption?.package?.weightKg
+    || config.shipping.defaultWeightKg,
+    0
+  );
+}
+
+function shippingMethodSupportsWeight(method, targetWeightKg) {
+  const minWeight = parseNumber(method?.min_weight, null);
+  const maxWeight = parseNumber(method?.max_weight, null);
+
+  if (!Number.isFinite(targetWeightKg) || targetWeightKg <= 0) {
+    return true;
+  }
+
+  if (!Number.isFinite(minWeight) && !Number.isFinite(maxWeight)) {
+    return true;
+  }
+
+  if (Number.isFinite(minWeight) && targetWeightKg < minWeight) {
+    return false;
+  }
+
+  if (Number.isFinite(maxWeight) && targetWeightKg > maxWeight) {
+    return false;
+  }
+
+  return true;
 }
 
 function buildEstimatedLabel(minDays, maxDays) {
